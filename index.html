@@ -291,8 +291,13 @@ function jsonp(action,params={}){
     const script=document.createElement('script');
     const qs=new URLSearchParams({action,callback:cbName,...params}).toString();
     script.src=API_URL+'?'+qs;
-    window[cbName]=(data)=>{delete window[cbName];document.body.removeChild(script);resolve(data);};
-    script.onerror=()=>{delete window[cbName];document.body.removeChild(script);reject(new Error('Error de red'));};
+    const timer=setTimeout(()=>{
+      delete window[cbName];
+      if(script.parentNode)document.body.removeChild(script);
+      reject(new Error('Timeout'));
+    },15000);
+    window[cbName]=(data)=>{clearTimeout(timer);delete window[cbName];if(script.parentNode)document.body.removeChild(script);resolve(data);};
+    script.onerror=()=>{clearTimeout(timer);delete window[cbName];if(script.parentNode)document.body.removeChild(script);reject(new Error('Error de red'));};
     document.body.appendChild(script);
   });
 }
