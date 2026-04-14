@@ -258,7 +258,7 @@ function detectCat(d){const t=d.toLowerCase();for(const c of CATS)if(c.kw.some(k
 
 let vY=new Date().getFullYear(),vM=new Date().getMonth();
 let gastos=[],fijos=[];
-let API_URL='';
+let API_URL='https://script.google.com/macros/s/AKfycbxWBn0OJc7R8OTY5XbzSoOmjIa4SBu8yl1BCyvjZKJc1pLf-G5FhQHEV0Mj7cQjHTT0/exec';
 let chartInst=null,compareInst=null,chartType='mensual';
 let curSel='UYU',curSelF='UYU';
 
@@ -279,9 +279,10 @@ document.getElementById('l-user').addEventListener('keydown',e=>{if(e.key==='Ent
 if(sessionStorage.getItem('auth')){document.getElementById('login-wrap').classList.add('hidden');document.getElementById('shell').classList.add('visible');}
 
 function init(){
-  API_URL=localStorage.getItem('mg_api')||'';
-  if(API_URL){document.getElementById('cfg-url').value=API_URL;cargarDatos();}
-  else render();
+  const saved=localStorage.getItem('mg_api');
+  if(saved) API_URL=saved;
+  document.getElementById('cfg-url').value=API_URL;
+  cargarDatos();
 }
 if(sessionStorage.getItem('auth'))init();
 
