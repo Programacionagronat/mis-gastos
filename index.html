@@ -142,6 +142,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
         <button onclick="chMon(1)">&#8594;</button>
       </div>
       <div class="stats" id="stats-top"></div>
+      <div class="section" id="ahorro-section"></div>
       <div class="section"><h3>Por categoría</h3><div id="bars-cat"></div></div>
       <div class="section"><h3>Últimos gastos</h3><div id="recientes"></div></div>
     </div>
@@ -173,8 +174,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
         <div class="chart-legend" id="chart-legend"></div>
       </div>
       <div class="section">
-        <h3>Últimos 6 meses — total UYU</h3>
+        <h3>Últimos meses — total UYU</h3>
         <div class="chart-wrap" style="height:180px"><canvas id="compare-chart" role="img" aria-label="Comparación mensual">Comparación mensual</canvas></div>
+      </div>
+      <div class="section">
+        <h3>Ahorro mes a mes</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Requiere tener el sueldo configurado</div>
+        <div class="chart-wrap" style="height:180px"><canvas id="ahorro-chart" role="img" aria-label="Ahorro mensual">Ahorro mensual</canvas></div>
       </div>
     </div>
 
@@ -251,6 +257,8 @@ const CATS=[
   {n:'Salud',c:'#A32D2D',bg:'#FCEBEB',kw:['medico','farmacia','medicamento','salud','mutualista','clinica','dentista']},
   {n:'Trabajo',c:'#444441',bg:'#F1EFE8',kw:['trabajo','empresa','agronat','oficina','herramienta']},
   {n:'Deporte',c:'#993C1D',bg:'#FAECE7',kw:['gym','gimnasio','deporte','fitness','pilates','natacion','futbol','cancha']},
+  {n:'Compras',c:'#0C447C',bg:'#B5D4F4',kw:['ropa','zapatillas','electrodomestico','compra','tienda','shopping']},
+  {n:'Impuestos',c:'#3C3489',bg:'#CECBF6',kw:['impuesto','dgi','patente','multa','tasa']},
   {n:'Otros',c:'#5F5E5A',bg:'#F1EFE8',kw:[]},
 ];
 function catInfo(n){return CATS.find(c=>c.n===n)||CATS[CATS.length-1];}
@@ -259,8 +267,9 @@ function detectCat(d){const t=d.toLowerCase();for(const c of CATS)if(c.kw.some(k
 let vY=new Date().getFullYear(),vM=new Date().getMonth();
 let gastos=[],fijos=[];
 let API_URL='https://script.google.com/macros/s/AKfycbxWBn0OJc7R8OTY5XbzSoOmjIa4SBu8yl1BCyvjZKJc1pLf-G5FhQHEV0Mj7cQjHTT0/exec';
-let chartInst=null,compareInst=null,chartType='mensual';
+let chartInst=null,compareInst=null,ahorroInst=null,chartType='mensual';
 let curSel='UYU',curSelF='UYU';
+let sueldoUYU=0,sueldoUSD=0,adicionalUYU=0,adicionalUSD=0;
 
 function doLogin(){
   const u=document.getElementById('l-user').value.trim().toLowerCase();
@@ -282,6 +291,7 @@ function init(){
   const saved=localStorage.getItem('mg_api');
   if(saved) API_URL=saved;
   document.getElementById('cfg-url').value=API_URL;
+  
   cargarDatos();
 }
 if(sessionStorage.getItem('auth'))init();
@@ -307,8 +317,15 @@ async function apiCall(action,data={}){return jsonp(action,Object.fromEntries(Ob
 async function cargarDatos(){
   showLoading('Cargando datos...');
   try{
-    const [rg,rf]=await Promise.all([apiCall('getGastos'),apiCall('getFijos')]);
-    gastos=rg.gastos||[];fijos=rf.fijos||[];
+    const [rg,rf,rs]=await Promise.all([apiCall('getGastos'),apiCall('getFijos'),apiCall('getSueldo')]);
+    gastos=rg.gastos||[];
+    fijos=rf.fijos||[];
+    if(rs&&rs.sueldo){
+      sueldoUYU=parseFloat(rs.sueldo.uyu)||0;
+      sueldoUSD=parseFloat(rs.sueldo.usd)||0;
+      adicionalUYU=parseFloat(rs.sueldo.auyu)||0;
+      adicionalUSD=parseFloat(rs.sueldo.ausd)||0;
+    }
   }catch(e){showToast('Error al conectar','err');}
   hideLoading();render();
 }
@@ -319,7 +336,26 @@ function fmtDate(s){return new Date(s+'T12:00:00').toLocaleDateString('es-UY',{d
 function fmtN(n,cur){if(cur==='USD')return 'U$D '+parseFloat(n).toLocaleString('es-UY',{minimumFractionDigits:2,maximumFractionDigits:2});return '$'+Math.round(n).toLocaleString('es-UY');}
 function p(n){return parseFloat(n||0);}
 function monthVars(y,m){return gastos.filter(g=>{const d=new Date(g.fecha+'T12:00:00');return d.getFullYear()===y&&d.getMonth()===m;});}
-function getLast6(){const a=[];for(let i=5;i>=0;i--){let mo=vM-i,yr=vY;if(mo<0){mo+=12;yr--;}a.push({y:yr,m:mo,lbl:new Date(yr,mo,1).toLocaleDateString('es-UY',{month:'short'})});}return a;}
+function getLast6(){
+  const a=[];
+  // Find first month with any data
+  let firstY=vY,firstM=vM;
+  if(gastos.length){
+    const dates=gastos.map(g=>new Date(g.fecha+'T12:00:00')).filter(d=>!isNaN(d));
+    if(dates.length){
+      const min=new Date(Math.min(...dates));
+      firstY=min.getFullYear();firstM=min.getMonth();
+    }
+  }
+  // Build months from first data month up to current view month (max 6)
+  const months=[];
+  let y=firstY,m=firstM;
+  while((y<vY)||(y===vY&&m<=vM)){
+    months.push({y,m,lbl:new Date(y,m,1).toLocaleDateString('es-UY',{month:'short'})});
+    m++;if(m>11){m=0;y++;}
+  }
+  return months.slice(-6);
+}
 
 function render(){
   ['mon-r','mon-g'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=monLabel(vY,vM);});
@@ -333,10 +369,80 @@ function renderStats(){
   const fusd=fijos.filter(f=>f.moneda==='USD').reduce((a,f)=>a+p(f.monto),0);
   const vuyu=mv.filter(g=>g.moneda==='UYU').reduce((a,g)=>a+p(g.monto),0);
   const vusd=mv.filter(g=>g.moneda==='USD').reduce((a,g)=>a+p(g.monto),0);
+  const totUYU=Math.round(vuyu+fuyu);
+  const totUSD=parseFloat((vusd+fusd).toFixed(2));
   document.getElementById('stats-top').innerHTML=`
-    <div class="stat green"><div class="stat-n">$${Math.round(vuyu+fuyu).toLocaleString('es-UY')}</div><div class="stat-l">Total UYU</div><div class="stat-s">Fijos $${Math.round(fuyu).toLocaleString('es-UY')}</div></div>
-    <div class="stat blue"><div class="stat-n">U$D ${(vusd+fusd).toFixed(2)}</div><div class="stat-l">Total USD</div><div class="stat-s">Fijos U$D ${fusd.toFixed(2)}</div></div>
+    <div class="stat green"><div class="stat-n">$${totUYU.toLocaleString('es-UY')}</div><div class="stat-l">Total UYU</div><div class="stat-s">Fijos $${Math.round(fuyu).toLocaleString('es-UY')}</div></div>
+    <div class="stat blue"><div class="stat-n">U$D ${totUSD.toFixed(2)}</div><div class="stat-l">Total USD</div><div class="stat-s">Fijos U$D ${fusd.toFixed(2)}</div></div>
     <div class="stat"><div class="stat-n">${mv.length}</div><div class="stat-l">Variables</div><div class="stat-s">este mes</div></div>`;
+  renderAhorro(totUYU,totUSD);
+}
+
+function renderAhorro(totUYU,totUSD){
+  const el=document.getElementById('ahorro-section');
+  if(!el)return;
+  const ingresoUYU=sueldoUYU+adicionalUYU;
+  const ingresoUSD=sueldoUSD+adicionalUSD;
+  const ahorroUYU=ingresoUYU-totUYU;
+  const ahorroUSD=ingresoUSD-totUSD;
+  const pctUYU=ingresoUYU>0?Math.round(ahorroUYU/ingresoUYU*100):null;
+  const colorUYU=ahorroUYU>=0?'#276749':'#c0392b';
+  const colorUSD=ahorroUSD>=0?'#276749':'#c0392b';
+  el.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0">Sueldo y ahorro</h3>
+      <button class="btn-sm" onclick="openSueldo()">Editar sueldo</button>
+    </div>
+    ${ingresoUYU===0&&ingresoUSD===0?`<div class="empty" style="padding:1rem">Ingresá tu sueldo para ver tu capacidad de ahorro</div>`:`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      ${ingresoUYU>0?`<div class="stat"><div class="stat-l">Ingreso UYU</div><div class="stat-n" style="font-size:16px">$${ingresoUYU.toLocaleString('es-UY')}</div></div>`:''}
+      ${ingresoUSD>0?`<div class="stat"><div class="stat-l">Ingreso USD</div><div class="stat-n" style="font-size:16px">U$D ${ingresoUSD.toFixed(2)}</div></div>`:''}
+      ${ingresoUYU>0?`<div class="stat"><div class="stat-l">Ahorro UYU</div><div class="stat-n" style="font-size:16px;color:${colorUYU}">$${Math.abs(ahorroUYU).toLocaleString('es-UY')}<span style="font-size:11px;margin-left:4px">${ahorroUYU>=0?'+':'-'}${pctUYU!==null?Math.abs(pctUYU)+'%':''}</span></div></div>`:''}
+      ${ingresoUSD>0?`<div class="stat"><div class="stat-l">Ahorro USD</div><div class="stat-n" style="font-size:16px;color:${colorUSD}">U$D ${Math.abs(ahorroUSD).toFixed(2)}</div></div>`:''}
+    </div>
+    ${ingresoUYU>0&&pctUYU!==null?`
+    <div style="margin-top:12px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:4px"><span>Gastos vs sueldo</span><span>${100-(pctUYU<0?100:pctUYU)}% gastado</span></div>
+      <div class="bar-track" style="height:8px"><div class="bar-fill" style="width:${Math.min(100,Math.round(totUYU/ingresoUYU*100))}%;background:${ahorroUYU>=0?'#2d6a4f':'#c0392b'}"></div></div>
+    </div>`:''}
+    `}`;
+}
+
+function openSueldo(){
+  const box=document.getElementById('modal-box');
+  box.innerHTML=`
+    <div class="modal-header"><h3>Ingresos del mes</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">El sueldo base se repite todos los meses. El adicional es para bonos o pagos puntuales de este mes.</div>
+    <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">Sueldo base</div>
+    <div class="form-row">
+      <div><label>UYU</label><input type="number" id="s-uyu" placeholder="0" value="${sueldoUYU||''}" inputmode="decimal"></div>
+      <div><label>USD</label><input type="number" id="s-usd" placeholder="0" value="${sueldoUSD||''}" inputmode="decimal"></div>
+    </div>
+    <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;margin-top:8px">Adicional este mes (bono, extra...)</div>
+    <div class="form-row">
+      <div><label>UYU</label><input type="number" id="s-auyu" placeholder="0" value="${adicionalUYU||''}" inputmode="decimal"></div>
+      <div><label>USD</label><input type="number" id="s-ausd" placeholder="0" value="${adicionalUSD||''}" inputmode="decimal"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-save" onclick="saveSueldo()">Guardar</button>
+    </div>`;
+  document.getElementById('modal-bg').classList.add('open');
+}
+
+async function saveSueldo(){
+  sueldoUYU=parseFloat(document.getElementById('s-uyu').value)||0;
+  sueldoUSD=parseFloat(document.getElementById('s-usd').value)||0;
+  adicionalUYU=parseFloat(document.getElementById('s-auyu').value)||0;
+  adicionalUSD=parseFloat(document.getElementById('s-ausd').value)||0;
+  closeModal();
+  showLoading('Guardando...');
+  try{
+    await apiCall('saveSueldo',{uyu:sueldoUYU,usd:sueldoUSD,auyu:adicionalUYU,ausd:adicionalUSD});
+    showToast('Ingresos guardados');
+  }catch(e){showToast('Error al guardar','err');}
+  hideLoading();
+  renderStats();
 }
 
 function renderBars(){
@@ -410,8 +516,32 @@ function buildCatFilter(){
   if(cur)el.value=cur;
 }
 
+function renderChartAhorro(){
+  const el=document.getElementById('ahorro-chart');if(!el)return;
+  const months=getLast6();
+  const data=months.map(({y,m})=>{
+    const mv=monthVars(y,m);
+    const fv=fijos.filter(f=>f.moneda==='UYU').reduce((a,f)=>a+p(f.monto),0);
+    const gastoMes=Math.round(mv.filter(g=>g.moneda==='UYU').reduce((a,g)=>a+p(g.monto),0)+fv);
+    const ingreso=sueldoUYU+adicionalUYU;
+    if(ingreso===0)return null;
+    return ingreso-gastoMes;
+  });
+  if(data.every(d=>d===null)){
+    if(ahorroInst)ahorroInst.destroy();return;
+  }
+  const colors=data.map(d=>d===null?'#ccc':d>=0?'#2d6a4f':'#c0392b');
+  if(ahorroInst)ahorroInst.destroy();
+  ahorroInst=new Chart(el,{
+    type:'bar',
+    data:{labels:months.map(m=>m.lbl),datasets:[{label:'Ahorro UYU',data:data.map(d=>d===null?0:d),backgroundColor:colors,borderRadius:5}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{y:{ticks:{callback:v=>'$'+v.toLocaleString('es-UY')},grid:{color:'#f0efe9'}},x:{grid:{display:false}}}}
+  });
+}
+
 function setChart(type,btn){chartType=type;document.querySelectorAll('.ctype-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderCharts();}
-function renderCharts(){if(chartType==='mensual')renderChartMensual();else if(chartType==='categorias')renderChartCats();else renderChartEvol();renderChartCompare();}
+function renderCharts(){if(chartType==='mensual')renderChartMensual();else if(chartType==='categorias')renderChartCats();else renderChartEvol();renderChartCompare();renderChartAhorro();}
 
 function renderChartMensual(){
   document.getElementById('chart-legend').innerHTML='';
