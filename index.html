@@ -546,10 +546,24 @@ function renderChartAhorro(){
   const colors=data.map(d=>d===null?'#ccc':d>=0?'#2d6a4f':'#c0392b');
   if(ahorroInst)ahorroInst.destroy();
   ahorroInst=new Chart(el,{
-    type:'bar',
-    data:{labels:months.map(m=>m.lbl),datasets:[{label:'Ahorro UYU',data:data.map(d=>d===null?0:d),backgroundColor:colors,borderRadius:5}]},
+    type:'line',
+    data:{labels:months.map(m=>m.lbl),datasets:[{
+      label:'Ahorro UYU',
+      data:data.map(d=>d===null?0:d),
+      borderColor:'#2d6a4f',
+      backgroundColor:'#2d6a4f11',
+      tension:.3,
+      fill:true,
+      pointRadius:6,
+      pointBackgroundColor:colors,
+      pointBorderColor:colors,
+      pointHoverRadius:8
+    }]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{y:{ticks:{callback:v=>'$'+v.toLocaleString('es-UY')},grid:{color:'#f0efe9'}},x:{grid:{display:false}}}}
+      scales:{
+        y:{ticks:{callback:v=>'$'+v.toLocaleString('es-UY')},grid:{color:'#f0efe9'}},
+        x:{grid:{display:false}}
+      }}
   });
 }
 
@@ -561,7 +575,7 @@ function renderChartMensual(){
   const months=getLast6();
   const data=months.map(({y,m})=>{const mv=monthVars(y,m);const fv=fijos.filter(f=>f.moneda==='UYU').reduce((a,f)=>a+p(f.monto),0);return Math.round(mv.filter(g=>g.moneda==='UYU').reduce((a,g)=>a+p(g.monto),0)+fv);});
   if(chartInst)chartInst.destroy();
-  chartInst=new Chart(document.getElementById('main-chart'),{type:'bar',data:{labels:months.map(m=>m.lbl),datasets:[{label:'UYU',data,backgroundColor:'#2d6a4f',borderRadius:5}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'$'+v.toLocaleString('es-UY')},grid:{color:'#f0efe9'}},x:{grid:{display:false}}}}});
+  chartInst=new Chart(document.getElementById('main-chart'),{type:'line',data:{labels:months.map(m=>m.lbl),datasets:[{label:'UYU',data,borderColor:'#2d6a4f',backgroundColor:'#2d6a4f22',tension:.3,fill:true,pointRadius:5,pointBackgroundColor:'#2d6a4f',pointHoverRadius:7}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'$'+v.toLocaleString('es-UY')},grid:{color:'#f0efe9'}},x:{grid:{display:false}}}}});
 }
 function renderChartCats(){
   const mv=monthVars(vY,vM);const byCat={};
