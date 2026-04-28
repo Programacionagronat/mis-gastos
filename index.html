@@ -131,6 +131,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
     <button class="tab" onclick="gTab('gastos',this)">Gastos</button>
     <button class="tab" onclick="gTab('graficos',this)">Gráficos</button>
     <button class="tab" onclick="gTab('fijos',this)">Fijos</button>
+    <button class="tab" onclick="gTab('recordatorios',this)">Recordatorios</button>
     <button class="tab" onclick="gTab('config',this)">Configurar</button>
   </div>
   <div class="page-content">
@@ -144,6 +145,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
       <div class="stats" id="stats-top"></div>
       <div class="section" id="ahorro-section"></div>
       <div class="section"><h3>Por categoría</h3><div id="bars-cat"></div></div>
+      <div class="section" id="rec-alert" style="display:none;border-color:#e8a838;background:#fffbf0"></div>
       <div class="section"><h3>Últimos gastos</h3><div id="recientes"></div></div>
     </div>
 
@@ -191,6 +193,15 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
       </div>
       <div class="section" id="fijos-list"></div>
       <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:6px">Se suman automáticamente al resumen de cada mes</div>
+    </div>
+
+    <div class="tpage" id="gt-recordatorios">
+      <div class="sec-header">
+        <h3 style="font-size:15px;font-weight:600">Recordatorios de pago</h3>
+        <button class="btn-sm" onclick="openModalRec()">+ Agregar</button>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:14px">El bot de Telegram te avisa automáticamente cuando un pago vence en los próximos 3 días.</div>
+      <div class="section" id="rec-list"></div>
     </div>
 
     <div class="tpage" id="gt-config">
@@ -330,9 +341,10 @@ async function apiCall(action,data={}){return jsonp(action,Object.fromEntries(Ob
 async function cargarDatos(){
   showLoading('Cargando datos...');
   try{
-    const [rg,rf,rs]=await Promise.all([apiCall('getGastos'),apiCall('getFijos'),apiCall('getSueldo')]);
+    const [rg,rf,rs,rr]=await Promise.all([apiCall('getGastos'),apiCall('getFijos'),apiCall('getSueldo'),apiCall('getRecordatorios')]);
     gastos=rg.gastos||[];
     fijos=rf.fijos||[];
+    recordatorios=rr.recordatorios||[];
     if(rs&&rs.sueldo){
       sueldoUYU=parseFloat(rs.sueldo.uyu)||0;
       sueldoUSD=parseFloat(rs.sueldo.usd)||0;
@@ -372,7 +384,7 @@ function getLast6(){
 
 function render(){
   ['mon-r','mon-g'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=monLabel(vY,vM);});
-  renderStats();renderBars();renderRecientes();renderGastos();renderFijos();buildCatFilter();
+  renderStats();renderBars();renderRecientes();renderGastos();renderFijos();renderRecordatorios();buildCatFilter();
   if(document.getElementById('gt-graficos').classList.contains('active'))renderCharts();
 }
 
@@ -700,6 +712,103 @@ function showLoading(msg){
   document.getElementById('loading-msg').textContent=msg||'Cargando...';el.style.display='flex';
 }
 function hideLoading(){const el=document.getElementById('loading-overlay');if(el)el.style.display='none';}
+
+// ── RECORDATORIOS ────────────────────────────────────────────
+let recordatorios=[];
+
+async function cargarRecordatorios(){
+  try{
+    const r=await apiCall('getRecordatorios');
+    recordatorios=r.recordatorios||[];
+  }catch(e){}
+}
+
+function renderRecordatorios(){
+  const el=document.getElementById('rec-list');
+  if(!el)return;
+  if(!recordatorios.length){el.innerHTML='<div class="empty">Sin recordatorios — agregá uno</div>';renderAlertaHoy();return;}
+  const hoy=new Date();
+  el.innerHTML=recordatorios.map((r,i)=>{
+    const diasFalta=r.dia-hoy.getDate();
+    const estado=diasFalta<0?'pagado este mes':diasFalta===0?'vence hoy':diasFalta===1?'vence mañana':`vence en ${diasFalta} días`;
+    const color=diasFalta<0?'var(--muted)':diasFalta<=1?'#c0392b':diasFalta<=3?'#e8a838':'#2d6a4f';
+    return `<div class="exp-row">
+      <div class="cat-dot" style="background:${color}"></div>
+      <div class="exp-info">
+        <div class="exp-desc">${r.nombre}</div>
+        <div class="exp-meta">Día ${r.dia} de cada mes${r.monto?` · $${parseFloat(r.monto).toLocaleString('es-UY')}`:''}  <span style="color:${color};font-weight:500">${estado}</span></div>
+      </div>
+      <div class="exp-del" onclick="delRec('${r.id}')" title="Eliminar">✕</div>
+    </div>`;
+  }).join('');
+  renderAlertaHoy();
+}
+
+function renderAlertaHoy(){
+  const el=document.getElementById('rec-alert');
+  if(!el)return;
+  const hoy=new Date();
+  const proximos=recordatorios.filter(r=>{
+    const dias=r.dia-hoy.getDate();
+    return dias>=0&&dias<=3;
+  });
+  if(!proximos.length){el.style.display='none';return;}
+  el.style.display='block';
+  el.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <span style="font-size:16px">⚠️</span>
+    <h3 style="margin:0;color:#854F0B">Próximos vencimientos</h3>
+  </div>`+proximos.map(r=>{
+    const dias=r.dia-hoy.getDate();
+    const lbl=dias===0?'Vence HOY':dias===1?'Vence mañana':`Vence en ${dias} días`;
+    return `<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid #f0e0c0">
+      <span><b>${r.nombre}</b> — ${lbl}</span>
+      ${r.monto?`<span style="font-weight:600">$${parseFloat(r.monto).toLocaleString('es-UY')}</span>`:''}
+    </div>`;
+  }).join('');
+}
+
+function openModalRec(){
+  const box=document.getElementById('modal-box');
+  box.innerHTML=`
+    <div class="modal-header"><h3>Nuevo recordatorio</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="form-full"><label>Nombre del pago</label><input type="text" id="r-nombre" placeholder="ej: Alquiler, Mutualista..."></div>
+    <div class="form-row">
+      <div><label>Día del mes</label><input type="number" id="r-dia" placeholder="ej: 5" min="1" max="31" inputmode="numeric"></div>
+      <div><label>Monto aprox (opcional)</label><input type="number" id="r-monto" placeholder="0" inputmode="decimal"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-save" onclick="saveRec()">Guardar</button>
+    </div>`;
+  document.getElementById('modal-bg').classList.add('open');
+  setTimeout(()=>document.getElementById('r-nombre').focus(),80);
+}
+
+async function saveRec(){
+  const nombre=document.getElementById('r-nombre').value.trim();
+  const dia=parseInt(document.getElementById('r-dia').value);
+  const monto=parseFloat(document.getElementById('r-monto').value)||0;
+  if(!nombre||!dia||dia<1||dia>31){showToast('Completá nombre y día','err');return;}
+  closeModal();showLoading('Guardando...');
+  try{
+    await apiCall('saveRecordatorio',{nombre,dia,monto});
+    const r=await apiCall('getRecordatorios');
+    recordatorios=r.recordatorios||[];
+    showToast('Recordatorio guardado');
+  }catch(e){showToast('Error al guardar','err');}
+  hideLoading();renderRecordatorios();
+}
+
+async function delRec(id){
+  if(!confirm('¿Eliminar este recordatorio?'))return;
+  showLoading('Eliminando...');
+  try{
+    await apiCall('deleteRecordatorio',{id});
+    recordatorios=recordatorios.filter(r=>String(r.id)!==String(id));
+    showToast('Eliminado');
+  }catch(e){showToast('Error','err');}
+  hideLoading();renderRecordatorios();
+}
 
 function dlBot(){dl('bot_gastos.py','import requests, re, os\nfrom datetime import datetime\n\nTOKEN    = os.environ["TELEGRAM_TOKEN"]\nCHAT_ID  = os.environ["TELEGRAM_CHAT_ID"]\nAPI_URL  = os.environ["APPS_SCRIPT_URL"]\n\nKEYWORDS = {\n  "nafta":"Nafta","combustible":"Nafta","gasoil":"Nafta",\n  "uber":"Transporte","taxi":"Transporte","bus":"Transporte","peaje":"Transporte","remis":"Transporte",\n  "super":"Supermercado","supermercado":"Supermercado","disco":"Supermercado","almacen":"Supermercado",\n  "almuerzo":"Comida","comida":"Comida","pizza":"Comida","delivery":"Comida","resto":"Comida","cafe":"Comida",\n  "ute":"Casa","ose":"Casa","alquiler":"Casa","internet":"Casa","agua":"Casa","luz":"Casa","limpieza":"Casa",\n  "bar":"Salidas","boliche":"Salidas","cine":"Salidas","teatro":"Salidas","entrada":"Salidas",\n  "medico":"Salud","farmacia":"Salud","medicamento":"Salud","mutualista":"Salud",\n  "trabajo":"Trabajo","empresa":"Trabajo","agronat":"Trabajo","oficina":"Trabajo",\n  "gym":"Deporte","gimnasio":"Deporte","deporte":"Deporte","futbol":"Deporte","cancha":"Deporte",\n}\n\ndef detectar_cat(desc):\n    for w in desc.lower().split():\n        if w in KEYWORDS: return KEYWORDS[w]\n    return "Otros"\n\ndef parsear(txt):\n    txt = txt.strip()\n    m = re.match(r"^(\\d+(?:[.,]\\d+)?)(usd)?\\s+(.+?)(?:\\s+(\\w+))?$", txt, re.I)\n    if not m: return None\n    monto, cur, desc, cat = m.groups()\n    return {"fecha": datetime.now().strftime("%Y-%m-%d"), "monto": float(monto.replace(",",".")),\n            "moneda": "USD" if cur else "UYU", "desc": desc.strip(),\n            "cat": cat.capitalize() if cat else detectar_cat(desc), "via": "telegram"}\n\ndef guardar(g):\n    requests.get(API_URL, params={"action":"saveGasto", **g}, timeout=15)\n\ndef get_offset():\n    try:\n        with open(".offset") as f: return int(f.read())\n    except: return 0\n\ndef set_offset(n):\n    with open(".offset","w") as f: f.write(str(n))\n\noffset = get_offset()\nr = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates", params={"offset":offset,"timeout":5}, timeout=10)\nfor upd in r.json().get("result",[]):\n    offset = upd["update_id"] + 1\n    msg = upd.get("message",{})\n    if str(msg.get("chat",{}).get("id")) != CHAT_ID: continue\n    txt = msg.get("text","")\n    g = parsear(txt)\n    if g:\n        guardar(g)\n        resp = f"OK {g[\'desc\']} \u2014 {g[\'monto\']} {g[\'moneda\']} [{g[\'cat\']}]"\n    else:\n        resp = "Formato: monto descripcion [categoria]\\nEj: 500 nafta\\n1200 almuerzo comida\\n50usd netflix"\n    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id":CHAT_ID,"text":resp}, timeout=10)\nset_offset(offset)\n');}
 
